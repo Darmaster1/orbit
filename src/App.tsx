@@ -23,7 +23,7 @@ function HeartIcon() { return <span className="emoji-icon">♥</span> }
 
 function App() {
   const backend = useOrbitBackend()
-  const { data, user, workspace } = backend
+  const { data, user, workspace, workspaces } = backend
   const [tab, setTab] = useState<Tab>('dashboard')
   const [showExpense, setShowExpense] = useState(false)
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
@@ -32,6 +32,7 @@ function App() {
   const [editingCard, setEditingCard] = useState<Card | null>(null)
   const [showRuleFor, setShowRuleFor] = useState<Card | null>(null)
   const [selectedCard, setSelectedCard] = useState<Card | null>(null)
+  const [showCreateWorkspace, setShowCreateWorkspace] = useState(false)
   const [toast, setToast] = useState('')
   const [dark, setDark] = useState(false)
 
@@ -120,14 +121,14 @@ function App() {
   return (
     <div className={dark ? 'app dark' : 'app'}>
       <div className="app-shell">
-        <Sidebar tab={tab} setTab={setTab} dark={dark} setDark={setDark} data={data} user={user} workspace={workspace} onLogout={backend.logout} demo={backend.demo} />
+        <Sidebar tab={tab} setTab={setTab} dark={dark} setDark={setDark} data={data} user={user} workspace={workspace} workspaces={workspaces} onSwitchWorkspace={backend.switchWorkspace} onAddWorkspace={() => setShowCreateWorkspace(true)} onLogout={backend.logout} demo={backend.demo} />
         <main className="main">
           <MobileHeader tab={tab} user={user} setTab={setTab} />
           {tab === 'dashboard' && <Dashboard data={data} user={user} onAdd={() => { setEditingExpense(null); setShowExpense(true) }} onRecommend={() => setShowRecommend(true)} onCard={setSelectedCard} setTab={setTab} />}
           {tab === 'cards' && <CardsPage data={data} onCard={setSelectedCard} onAdd={() => { setEditingCard(null); setShowCardForm(true) }} canAdd={backend.demo || workspace?.role === 'admin'} onEditCard={(c) => { setEditingCard(c); setShowCardForm(true) }} onDeleteCard={deleteCard} />}
           {tab === 'expenses' && <ExpensesPage data={data} onAdd={() => { setEditingExpense(null); setShowExpense(true) }} onEdit={(e) => { setEditingExpense(e); setShowExpense(true) }} onDelete={deleteExpense} />}
           {tab === 'reports' && <ReportsPage data={data} />}
-          {tab === 'settings' && <SettingsPage data={data} workspace={workspace} user={user} demo={backend.demo} onUpdateWorkspace={backend.updateWorkspace} onAddMember={backend.addMember} onDeleteMember={backend.deleteMember} setToast={setToast} />}
+          {tab === 'settings' && <SettingsPage data={data} workspace={workspace} workspaces={workspaces} user={user} demo={backend.demo} onUpdateWorkspace={backend.updateWorkspace} onDeleteWorkspace={backend.deleteWorkspace} onAddMember={backend.addMember} onDeleteMember={backend.deleteMember} setToast={setToast} />}
           {tab === 'profile' && <ProfilePage user={user} workspace={workspace} onUpdateProfile={backend.updateProfile} onLogout={backend.logout} setToast={setToast} />}
         </main>
       </div>
@@ -140,6 +141,7 @@ function App() {
       {showRecommend && <RecommendationModal data={data} onClose={() => setShowRecommend(false)} />}
       {selectedCard && <CardDetail card={data.cards.find((card) => card.id === selectedCard.id) ?? selectedCard} data={data} onClose={() => setSelectedCard(null)} onAdd={() => { setSelectedCard(null); setEditingExpense(null); setShowExpense(true) }} canManage={backend.demo || workspace?.role === 'admin'} onAddRule={() => setShowRuleFor(selectedCard)} onEditCard={() => { const c = selectedCard; setSelectedCard(null); setEditingCard(c); setShowCardForm(true) }} onDeleteCard={() => deleteCard(selectedCard.id)} onDeleteRule={(ruleId) => deleteRule(selectedCard.id, ruleId)} />}
       {showRuleFor && <RuleModal card={data.cards.find((card) => card.id === showRuleFor.id) ?? showRuleFor} data={data} onClose={() => setShowRuleFor(null)} onSave={addRule} />}
+      {showCreateWorkspace && <CreateJoinWorkspaceModal onClose={() => setShowCreateWorkspace(false)} onCreate={async (n) => { await backend.makeFamily(n); setShowCreateWorkspace(false); setToast('Created new workspace!') }} onJoin={async (c) => { await backend.enterFamily(c); setShowCreateWorkspace(false); setToast('Joined workspace!') }} />}
       {toast && <div className="toast"><Check size={17} /> {toast}</div>}
     </div>
   )
@@ -157,19 +159,45 @@ function NavButton({ item, active, onClick }: { item: typeof navItems[number]; a
   return <button className={active ? 'nav-item active' : 'nav-item'} onClick={onClick}><Icon size={19} /><span>{item.label}</span></button>
 }
 
-function Sidebar({ tab, setTab, dark, setDark, data, user, workspace, onLogout, demo }: { tab: Tab; setTab: (tab: Tab) => void; dark: boolean; setDark: (value: boolean) => void; data: FamilyData; user: { name: string; id: string } | null; workspace: { familyName: string; inviteCode: string; role: string } | null; onLogout: () => Promise<void>; demo: boolean }) {
+function Sidebar({ tab, setTab, dark, setDark, data, user, workspace, workspaces, onSwitchWorkspace, onAddWorkspace, onLogout, demo }: { tab: Tab; setTab: (tab: Tab) => void; dark: boolean; setDark: (value: boolean) => void; data: FamilyData; user: { name: string; id: string } | null; workspace: { familyId: string; familyName: string; inviteCode: string; role: string } | null; workspaces: { familyId: string; familyName: string; inviteCode: string; role: 'admin' | 'member' }[]; onSwitchWorkspace: (id: string) => Promise<void>; onAddWorkspace: () => void; onLogout: () => Promise<void>; demo: boolean }) {
+  const [openWsMenu, setOpenWsMenu] = useState(false)
   const currentMember = data.members.find((member) => member.id === user?.id)
+
   const copyInvite = async () => {
     if (!workspace?.inviteCode || demo) return
     await navigator.clipboard?.writeText(workspace.inviteCode)
   }
+
   return <aside className="sidebar">
     <div className="brand" style={{ cursor: 'pointer' }} onClick={() => setTab('dashboard')}><div className="brand-mark">o</div><span>orbit</span></div>
-    <div className="workspace" style={{ cursor: 'pointer' }} onClick={() => setTab('settings')}>
-      <div className="family-avatar">{workspace?.familyName.slice(0, 1).toUpperCase() ?? 'T'}</div>
-      <div><small>Family workspace</small><strong>{workspace?.familyName ?? 'The Tulsians'}</strong></div>
-      <ChevronDown size={15} />
+    
+    <div className="workspace-wrapper">
+      <div className="workspace" style={{ cursor: 'pointer' }} onClick={() => setOpenWsMenu(!openWsMenu)}>
+        <div className="family-avatar">{workspace?.familyName.slice(0, 1).toUpperCase() ?? 'T'}</div>
+        <div><small>Family workspace</small><strong>{workspace?.familyName ?? 'The Tulsians'}</strong></div>
+        <ChevronDown size={15} />
+      </div>
+
+      {openWsMenu && (
+        <div className="workspace-dropdown">
+          <div style={{ padding: '4px 8px 2px', fontSize: '9px', textTransform: 'uppercase', color: 'var(--muted)', fontFamily: 'DM Mono' }}>Switch Workspace</div>
+          {workspaces.map((w) => (
+            <button key={w.familyId} className={w.familyId === workspace?.familyId ? 'workspace-option active' : 'workspace-option'} onClick={() => { void onSwitchWorkspace(w.familyId); setOpenWsMenu(false) }}>
+              <div>
+                <strong>{w.familyName}</strong>
+                <small>{w.role === 'admin' ? 'Administrator' : 'Member'}</small>
+              </div>
+              {w.familyId === workspace?.familyId && <Check size={14} style={{ color: 'var(--teal)' }} />}
+            </button>
+          ))}
+          <div className="workspace-divider" />
+          <button className="workspace-action-btn" onClick={() => { setOpenWsMenu(false); onAddWorkspace() }}>
+            <Plus size={14} /> Create or Join Workspace
+          </button>
+        </div>
+      )}
     </div>
+
     <nav className="side-nav">
       {navItems.map((item) => <NavButton key={item.id} item={item} active={tab === item.id} onClick={() => setTab(item.id)} />)}
     </nav>
@@ -185,6 +213,135 @@ function Sidebar({ tab, setTab, dark, setDark, data, user, workspace, onLogout, 
       </button>
     </div>
   </aside>
+}
+
+function SettingsPage({ data, workspace, workspaces, user, demo, onUpdateWorkspace, onDeleteWorkspace, onAddMember, onDeleteMember, setToast }: { data: FamilyData; workspace: { familyId: string; familyName: string; inviteCode: string; role: string } | null; workspaces: { familyId: string; familyName: string; inviteCode: string; role: 'admin' | 'member' }[]; user: { id: string; name: string } | null; demo: boolean; onUpdateWorkspace: (name: string) => Promise<void>; onDeleteWorkspace: (id: string) => Promise<void>; onAddMember: (name: string, role: 'admin' | 'member') => Promise<void>; onDeleteMember: (id: string) => Promise<void>; setToast: (msg: string) => void }) {
+  const [familyName, setFamilyName] = useState(workspace?.familyName ?? data.familyName)
+  const [newMemberName, setNewMemberName] = useState('')
+  const [newMemberRole, setNewMemberRole] = useState<'admin' | 'member'>('member')
+  const [busy, setBusy] = useState(false)
+
+  const handleUpdateWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      await onUpdateWorkspace(familyName)
+      setToast('Workspace name updated')
+    } catch (caught) {
+      setToast(caught instanceof Error ? caught.message : 'Could not update workspace')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleDeleteWorkspace = async () => {
+    if (!workspace?.familyId) return
+    if (!window.confirm(`Are you sure you want to delete workspace "${workspace.familyName}"? All cards and expenses in this workspace will be permanently removed.`)) return
+    setBusy(true)
+    try {
+      await onDeleteWorkspace(workspace.familyId)
+      setToast('Workspace deleted')
+    } catch (caught) {
+      setToast(caught instanceof Error ? caught.message : 'Could not delete workspace')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleAddMember = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newMemberName.trim()) return
+    setBusy(true)
+    try {
+      await onAddMember(newMemberName.trim(), newMemberRole)
+      setNewMemberName('')
+      setToast(`Added ${newMemberName} to family`)
+    } catch (caught) {
+      setToast(caught instanceof Error ? caught.message : 'Could not add member')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleDeleteMember = async (id: string, name: string) => {
+    try {
+      await onDeleteMember(id)
+      setToast(`Removed ${name}`)
+    } catch (caught) {
+      setToast(caught instanceof Error ? caught.message : 'Could not remove member')
+    }
+  }
+
+  const copyInvite = async () => {
+    if (!workspace?.inviteCode || demo) return
+    await navigator.clipboard?.writeText(workspace.inviteCode)
+    setToast('Invite code copied to clipboard!')
+  }
+
+  return <div className="page">
+    <PageTitle eyebrow="Workspace configuration" title="Family Settings" subtitle="Manage your household workspace, members, and permissions" />
+    <div className="settings-grid">
+      <div className="settings-card">
+        <h2><Users size={18} /> Workspace Details</h2>
+        <form className="expense-form" onSubmit={handleUpdateWorkspace}>
+          <label>Family Workspace Name
+            <input value={familyName} onChange={(e) => setFamilyName(e.target.value)} required />
+          </label>
+          <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
+            {workspace?.role === 'admin' ? (
+              <button type="button" className="button button-outline danger-button" onClick={handleDeleteWorkspace} disabled={busy}><Trash2 size={16} /> Delete Workspace</button>
+            ) : <div />}
+            <button className="button button-dark" disabled={busy}>Save Workspace Name</button>
+          </div>
+        </form>
+      </div>
+
+      <div className="settings-card">
+        <h2><Users size={18} /> Family Members ({data.members.length})</h2>
+        <p>People sharing cards and logging expenses in this workspace.</p>
+        <div className="member-list" style={{ display: 'grid', gap: '10px' }}>
+          {data.members.map((member) => (
+            <div key={member.id} className="member-item">
+              <div className="member-info">
+                <div className="avatar" style={{ background: member.color }}>{member.initials}</div>
+                <div>
+                  <strong>{member.name}</strong>
+                  <small>{member.email ?? `${member.name.toLowerCase()}@orbit.local`}</small>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="role-badge">{member.role}</span>
+                {member.id !== user?.id && data.members.length > 1 && (
+                  <button className="button button-outline compact danger-button" onClick={() => handleDeleteMember(member.id, member.name)}><Trash2 size={13} /></button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <form className="expense-form" onSubmit={handleAddMember} style={{ marginTop: '14px' }}>
+          <label>Add New Family Member</label>
+          <div className="form-row">
+            <input placeholder="Member Name" value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} required />
+            <select value={newMemberRole} onChange={(e) => setNewMemberRole(e.target.value as any)}>
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <button className="button button-dark" disabled={busy}><Plus size={16} /> Add Member</button>
+        </form>
+      </div>
+
+      <div className="settings-card">
+        <h2><Gift size={18} /> Invite Code</h2>
+        <p>Share this code with your family members so they can join your workspace during setup.</p>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <input readOnly value={demo ? 'DEMO-INVITE-2026' : (workspace?.inviteCode ?? 'NO-CODE')} style={{ fontFamily: 'DM Mono', fontWeight: 'bold', fontSize: '14px', letterSpacing: '1px' }} />
+          <button className="button button-outline" onClick={copyInvite}>Copy Invite</button>
+        </div>
+      </div>
+    </div>
+  </div>
 }
 
 function MobileHeader({ tab, user, setTab }: { tab: Tab; user: { name: string } | null; setTab: (t: Tab) => void }) {
@@ -254,117 +411,7 @@ function ExpenseTableRow({ expense, data, onEdit, onDelete }: { expense: Expense
   return <div className="table-row"><div className="purchase-cell"><div className="expense-icon small" style={{ background: `${category?.color}20`, color: category?.color }}><Icon size={15} /></div><div><strong>{expense.merchant}</strong><span>{category?.name} {expense.tagIds.slice(0, 2).map((id) => <em key={id}>{data.tags.find((tag) => tag.id === id)?.name}</em>)}</span></div></div><div className="card-cell"><span className="card-dot" style={{ background: card?.accent }} />{card?.name}<small>•••• {card?.lastFour}</small></div><div className="owner-cell"><div className="avatar tiny" style={{ background: owner?.color }}>{owner?.initials[0]}</div>{owner?.name}</div><span className="date-cell">{formatDate(expense.date)}</span><strong className="amount-cell">{money(expense.amount)}</strong><div className="table-actions"><button onClick={() => onEdit(expense)} title="Edit expense"><Pencil size={14} /></button><button className="delete-btn" onClick={() => onDelete(expense.id)} title="Delete expense"><Trash2 size={14} /></button></div></div>
 }
 
-function SettingsPage({ data, workspace, user, demo, onUpdateWorkspace, onAddMember, onDeleteMember, setToast }: { data: FamilyData; workspace: { familyName: string; inviteCode: string; role: string } | null; user: { id: string; name: string } | null; demo: boolean; onUpdateWorkspace: (name: string) => Promise<void>; onAddMember: (name: string, role: 'admin' | 'member') => Promise<void>; onDeleteMember: (id: string) => Promise<void>; setToast: (msg: string) => void }) {
-  const [familyName, setFamilyName] = useState(workspace?.familyName ?? data.familyName)
-  const [newMemberName, setNewMemberName] = useState('')
-  const [newMemberRole, setNewMemberRole] = useState<'admin' | 'member'>('member')
-  const [busy, setBusy] = useState(false)
 
-  const handleUpdateWorkspace = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setBusy(true)
-    try {
-      await onUpdateWorkspace(familyName)
-      setToast('Workspace name updated')
-    } catch (caught) {
-      setToast(caught instanceof Error ? caught.message : 'Could not update workspace')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleAddMember = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newMemberName.trim()) return
-    setBusy(true)
-    try {
-      await onAddMember(newMemberName.trim(), newMemberRole)
-      setNewMemberName('')
-      setToast(`Added ${newMemberName} to family`)
-    } catch (caught) {
-      setToast(caught instanceof Error ? caught.message : 'Could not add member')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleDeleteMember = async (id: string, name: string) => {
-    try {
-      await onDeleteMember(id)
-      setToast(`Removed ${name}`)
-    } catch (caught) {
-      setToast(caught instanceof Error ? caught.message : 'Could not remove member')
-    }
-  }
-
-  const copyInvite = async () => {
-    if (!workspace?.inviteCode || demo) return
-    await navigator.clipboard?.writeText(workspace.inviteCode)
-    setToast('Invite code copied to clipboard!')
-  }
-
-  return <div className="page">
-    <PageTitle eyebrow="Workspace configuration" title="Family Settings" subtitle="Manage your household workspace, members, and permissions" />
-    <div className="settings-grid">
-      <div className="settings-card">
-        <h2><Users size={18} /> Workspace Details</h2>
-        <form className="expense-form" onSubmit={handleUpdateWorkspace}>
-          <label>Family Workspace Name
-            <input value={familyName} onChange={(e) => setFamilyName(e.target.value)} required />
-          </label>
-          <div className="modal-actions">
-            <button className="button button-dark" disabled={busy}>Save Workspace Name</button>
-          </div>
-        </form>
-      </div>
-
-      <div className="settings-card">
-        <h2><Users size={18} /> Family Members ({data.members.length})</h2>
-        <p>People sharing cards and logging expenses in this workspace.</p>
-        <div className="member-list" style={{ display: 'grid', gap: '10px' }}>
-          {data.members.map((member) => (
-            <div key={member.id} className="member-item">
-              <div className="member-info">
-                <div className="avatar" style={{ background: member.color }}>{member.initials}</div>
-                <div>
-                  <strong>{member.name}</strong>
-                  <small>{member.email ?? `${member.name.toLowerCase()}@orbit.local`}</small>
-                </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span className="role-badge">{member.role}</span>
-                {member.id !== user?.id && data.members.length > 1 && (
-                  <button className="button button-outline compact danger-button" onClick={() => handleDeleteMember(member.id, member.name)}><Trash2 size={13} /></button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <form className="expense-form" onSubmit={handleAddMember} style={{ marginTop: '14px' }}>
-          <label>Add New Family Member</label>
-          <div className="form-row">
-            <input placeholder="Member Name" value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} required />
-            <select value={newMemberRole} onChange={(e) => setNewMemberRole(e.target.value as any)}>
-              <option value="member">Member</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
-          <button className="button button-dark" disabled={busy}><Plus size={16} /> Add Member</button>
-        </form>
-      </div>
-
-      <div className="settings-card">
-        <h2><Gift size={18} /> Invite Code</h2>
-        <p>Share this code with your family members so they can join your workspace during setup.</p>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <input readOnly value={demo ? 'DEMO-INVITE-2026' : (workspace?.inviteCode ?? 'NO-CODE')} style={{ fontFamily: 'DM Mono', fontWeight: 'bold', fontSize: '14px', letterSpacing: '1px' }} />
-          <button className="button button-outline" onClick={copyInvite}>Copy Invite</button>
-        </div>
-      </div>
-    </div>
-  </div>
-}
 
 function ProfilePage({ user, workspace, onUpdateProfile, onLogout, setToast }: { user: { name: string; email: string } | null; workspace: { familyName: string; role: string } | null; onUpdateProfile: (name: string) => Promise<void>; onLogout: () => Promise<void>; setToast: (msg: string) => void }) {
   const [name, setName] = useState(user?.name ?? '')
@@ -601,6 +648,46 @@ function CardModal({ data, initialCard, onClose, onSave, onDelete }: { data: Fam
           <button type="button" className="button button-outline" onClick={onClose}>Cancel</button>
           <button className="button button-dark" disabled={busy}>{busy ? 'Saving…' : initialCard ? 'Update card' : 'Save card'} <Check size={16} /></button>
         </div>
+      </div>
+    </form>
+  </ModalShell>
+}
+
+function CreateJoinWorkspaceModal({ onClose, onCreate, onJoin }: { onClose: () => void; onCreate: (name: string) => Promise<void>; onJoin: (code: string) => Promise<void> }) {
+  const [mode, setMode] = useState<'create' | 'join'>('create')
+  const [familyName, setFamilyName] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setBusy(true); setError('')
+    try {
+      if (mode === 'create') await onCreate(familyName)
+      else await onJoin(inviteCode)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not set up workspace.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <ModalShell title="New Workspace" subtitle="Create a new household workspace or join one with an invite code." onClose={onClose}>
+    <div className="segmented" style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+      <button type="button" className={mode === 'create' ? 'button button-dark compact' : 'button button-outline compact'} onClick={() => setMode('create')}>Create workspace</button>
+      <button type="button" className={mode === 'join' ? 'button button-dark compact' : 'button button-outline compact'} onClick={() => setMode('join')}>Join workspace</button>
+    </div>
+    <form className="expense-form" onSubmit={submit}>
+      {mode === 'create' ? (
+        <label>Family name<input required placeholder="The Sharma Family" value={familyName} onChange={(event) => setFamilyName(event.target.value)} /></label>
+      ) : (
+        <label>Invite code<input required placeholder="e.g. A1B2C3D4" value={inviteCode} onChange={(event) => setInviteCode(event.target.value.toUpperCase())} /></label>
+      )}
+      {error && <div className="form-error">{error}</div>}
+      <div className="modal-actions">
+        <button type="button" className="button button-outline" onClick={onClose}>Cancel</button>
+        <button className="button button-dark" disabled={busy}>{busy ? 'Processing…' : mode === 'create' ? 'Create' : 'Join'}</button>
       </div>
     </form>
   </ModalShell>

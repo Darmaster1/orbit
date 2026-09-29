@@ -52,13 +52,42 @@ function displayName(profile: any) {
   return profile?.name || profile?.email?.split('@')[0] || 'Family member'
 }
 
-export async function loadWorkspace(userId: string): Promise<Workspace | null> {
-  const client = requireClient()
-  const membershipResult = await client.from('family_members').select('family_id, user_id, role').eq('user_id', userId).limit(1).maybeSingle()
-  if (membershipResult.error) throw membershipResult.error
-  if (!membershipResult.data) return null
+export type WorkspaceItem = {
+  familyId: string
+  familyName: string
+  inviteCode: string
+  role: 'admin' | 'member'
+}
 
-  const familyId = membershipResult.data.family_id as string
+export async function loadUserWorkspaces(userId: string): Promise<WorkspaceItem[]> {
+  const client = requireClient()
+  const membershipResult = await client.from('family_members').select('family_id, role').eq('user_id', userId)
+  if (membershipResult.error) throw membershipResult.error
+  if (!membershipResult.data || membershipResult.data.length === 0) return []
+
+  const familyIds = membershipResult.data.map((m) => m.family_id)
+  const familyResult = await client.from('families').select('id, name, invite_code').in('id', familyIds)
+  if (familyResult.error) throw familyResult.error
+
+  const roleMap = new Map(membershipResult.data.map((m) => [m.family_id, m.role]))
+  return (familyResult.data ?? []).map((f) => ({
+    familyId: f.id,
+    familyName: f.name,
+    inviteCode: f.invite_code,
+    role: roleMap.get(f.id) ?? 'member',
+  }))
+}
+
+export async function loadWorkspace(userId: string, targetFamilyId?: string): Promise<{ workspace: Workspace | null; allWorkspaces: WorkspaceItem[] }> {
+  const client = requireClient()
+  const allWorkspaces = await loadUserWorkspaces(userId)
+  if (allWorkspaces.length === 0) return { workspace: null, allWorkspaces: [] }
+
+  const selected = targetFamilyId
+    ? allWorkspaces.find((w) => w.familyId === targetFamilyId) ?? allWorkspaces[0]
+    : allWorkspaces[0]
+
+  const familyId = selected.familyId
   const [familyResult, memberResult, cardResult, categoryResult, tagResult, expenseResult] = await Promise.all([
     client.from('families').select('id, name, invite_code').eq('id', familyId).single(),
     client.from('family_members').select('family_id, user_id, role, joined_at').eq('family_id', familyId),
@@ -138,13 +167,21 @@ export async function loadWorkspace(userId: string): Promise<Workspace | null> {
     merchant: row.merchant, categoryId: row.category_id, date: row.date, note: row.note ?? '', tagIds: tagsByExpense.get(row.id) ?? [],
   }))
 
-  return {
+  const workspace: Workspace = {
     familyId,
     familyName: familyResult.data.name,
     inviteCode: familyResult.data.invite_code,
-    role: membershipResult.data.role,
+    role: selected.role,
     data: { familyName: familyResult.data.name, members, categories, tags, cards, expenses },
   }
+
+  return { workspace, allWorkspaces }
+}
+
+export async function deleteFamilyWorkspace(familyId: string) {
+  const client = requireClient()
+  const result = await client.rpc('delete_family', { family_id_input: familyId })
+  if (result.error) throw result.error
 }
 
 export async function createFamily(name: string) {

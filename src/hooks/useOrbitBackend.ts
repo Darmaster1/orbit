@@ -3,7 +3,7 @@ import type { Card, Expense, FamilyData } from '../types'
 import { demoData } from '../data/demoData'
 import { loadData, saveData } from '../lib/storage'
 import { isSupabaseConfigured, supabase, subscribeToFamily } from '../lib/supabase'
-import { createFamily, insertCard, insertExpense, insertRule, joinFamily, loadWorkspace, removeCard, removeExpense, removeFamilyMember, removeRule, updateCard, updateExpense, updateProfileName, updateWorkspaceName, type NewCard, type NewRule, type Workspace } from '../lib/supabaseData'
+import { createFamily, deleteFamilyWorkspace, insertCard, insertExpense, insertRule, joinFamily, loadWorkspace, removeCard, removeExpense, removeFamilyMember, removeRule, updateCard, updateExpense, updateProfileName, updateWorkspaceName, type NewCard, type NewRule, type Workspace, type WorkspaceItem } from '../lib/supabaseData'
 
 export type AppUser = { id: string; name: string; email: string }
 
@@ -12,18 +12,20 @@ export function useOrbitBackend() {
   const [data, setData] = useState<FamilyData>(() => loadData(demoData))
   const [user, setUser] = useState<AppUser | null>(demo ? { id: 'mohnish', name: 'Mohnish', email: 'mohnish@tulsian.family' } : null)
   const [workspace, setWorkspace] = useState<Workspace | null>(demo ? { familyId: 'demo-family', familyName: demoData.familyName, inviteCode: 'DEMO2026', role: 'admin', data: loadData(demoData) } : null)
+  const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>(demo ? [{ familyId: 'demo-family', familyName: demoData.familyName, inviteCode: 'DEMO2026', role: 'admin' }] : [])
   const [loading, setLoading] = useState(!demo)
   const [error, setError] = useState('')
 
-  const hydrate = useCallback(async (authUser: { id: string; email?: string | null; user_metadata?: { name?: string } }) => {
+  const hydrate = useCallback(async (authUser: { id: string; email?: string | null; user_metadata?: { name?: string } }, targetFamilyId?: string) => {
     setLoading(true)
     setError('')
     try {
       const nextUser = { id: authUser.id, name: authUser.user_metadata?.name || authUser.email?.split('@')[0] || 'Family member', email: authUser.email ?? '' }
       setUser(nextUser)
-      const nextWorkspace = await loadWorkspace(authUser.id)
-      setWorkspace(nextWorkspace)
-      if (nextWorkspace) setData(nextWorkspace.data)
+      const res = await loadWorkspace(authUser.id, targetFamilyId)
+      setWorkspace(res.workspace)
+      setWorkspaces(res.allWorkspaces)
+      if (res.workspace) setData(res.workspace.data)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not load your family workspace.')
     } finally {
@@ -42,17 +44,18 @@ export function useOrbitBackend() {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!active) return
       if (session?.user) window.setTimeout(() => void hydrate(session.user), 0)
-      else { setUser(null); setWorkspace(null); setLoading(false) }
+      else { setUser(null); setWorkspace(null); setWorkspaces([]); setLoading(false) }
     })
     return () => { active = false; listener.subscription.unsubscribe() }
   }, [demo, hydrate])
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (targetFamilyId?: string) => {
     if (demo || !user) return
-    const nextWorkspace = await loadWorkspace(user.id)
-    setWorkspace(nextWorkspace)
-    if (nextWorkspace) setData(nextWorkspace.data)
-  }, [demo, user])
+    const res = await loadWorkspace(user.id, targetFamilyId ?? workspace?.familyId)
+    setWorkspace(res.workspace)
+    setWorkspaces(res.allWorkspaces)
+    if (res.workspace) setData(res.workspace.data)
+  }, [demo, user, workspace?.familyId])
 
   useEffect(() => {
     if (demo || !workspace?.familyId) return
@@ -73,8 +76,61 @@ export function useOrbitBackend() {
     return result.data.session ? 'Account created.' : 'Check your email to confirm your account, then sign in.'
   }, [])
   const logout = useCallback(async () => { if (supabase) await supabase.auth.signOut() }, [])
-  const makeFamily = useCallback(async (name: string) => { await createFamily(name); if (user) await hydrate({ id: user.id, email: user.email, user_metadata: { name: user.name } }) }, [hydrate, user])
-  const enterFamily = useCallback(async (code: string) => { await joinFamily(code); if (user) await hydrate({ id: user.id, email: user.email, user_metadata: { name: user.name } }) }, [hydrate, user])
+  
+  const makeFamily = useCallback(async (name: string) => {
+    if (demo) {
+      const id = `demo-${Date.now()}`
+      const code = `DEMO${Math.floor(1000 + Math.random() * 9000)}`
+      const newW: WorkspaceItem = { familyId: id, familyName: name, inviteCode: code, role: 'admin' }
+      setWorkspaces((prev) => [...prev, newW])
+      setWorkspace({ familyId: id, familyName: name, inviteCode: code, role: 'admin', data: { ...demoData, familyName: name, cards: [], expenses: [] } })
+      setData({ ...demoData, familyName: name, cards: [], expenses: [] })
+    } else {
+      const familyId = await createFamily(name)
+      if (user) await hydrate({ id: user.id, email: user.email, user_metadata: { name: user.name } }, familyId)
+    }
+  }, [demo, hydrate, user])
+
+  const enterFamily = useCallback(async (code: string) => {
+    if (demo) {
+      const id = `demo-${Date.now()}`
+      const newW: WorkspaceItem = { familyId: id, familyName: 'Joined Family', inviteCode: code, role: 'member' }
+      setWorkspaces((prev) => [...prev, newW])
+      setWorkspace({ familyId: id, familyName: 'Joined Family', inviteCode: code, role: 'member', data: { ...demoData, familyName: 'Joined Family' } })
+      setData({ ...demoData, familyName: 'Joined Family' })
+    } else {
+      const familyId = await joinFamily(code)
+      if (user) await hydrate({ id: user.id, email: user.email, user_metadata: { name: user.name } }, familyId)
+    }
+  }, [demo, hydrate, user])
+
+  const switchWorkspace = useCallback(async (targetFamilyId: string) => {
+    if (demo) {
+      const target = workspaces.find((w) => w.familyId === targetFamilyId)
+      if (target) {
+        setWorkspace({ familyId: target.familyId, familyName: target.familyName, inviteCode: target.inviteCode, role: target.role, data: loadData({ ...demoData, familyName: target.familyName }) })
+        setData(loadData({ ...demoData, familyName: target.familyName }))
+      }
+    } else if (user) {
+      await hydrate({ id: user.id, email: user.email, user_metadata: { name: user.name } }, targetFamilyId)
+    }
+  }, [demo, hydrate, user, workspaces])
+
+  const deleteWorkspace = useCallback(async (familyIdToDelete: string) => {
+    if (demo) {
+      const remaining = workspaces.filter((w) => w.familyId !== familyIdToDelete)
+      setWorkspaces(remaining)
+      if (remaining.length > 0) {
+        setWorkspace({ familyId: remaining[0].familyId, familyName: remaining[0].familyName, inviteCode: remaining[0].inviteCode, role: remaining[0].role, data: loadData({ ...demoData, familyName: remaining[0].familyName }) })
+        setData(loadData({ ...demoData, familyName: remaining[0].familyName }))
+      } else {
+        setWorkspace(null)
+      }
+    } else {
+      await deleteFamilyWorkspace(familyIdToDelete)
+      if (user) await hydrate({ id: user.id, email: user.email, user_metadata: { name: user.name } })
+    }
+  }, [demo, hydrate, user, workspaces])
 
   const addExpense = useCallback(async (expense: Expense) => {
     if (demo || !workspace?.familyId || !user) setData((current) => ({ ...current, expenses: [expense, ...current.expenses] }))
@@ -171,8 +227,8 @@ export function useOrbitBackend() {
   }, [demo, refresh, user])
 
   return {
-    data, user, workspace, loading, error, demo, authRequired: !demo,
-    login, signup, logout, makeFamily, enterFamily,
+    data, user, workspace, workspaces, loading, error, demo, authRequired: !demo,
+    login, signup, logout, makeFamily, enterFamily, switchWorkspace, deleteWorkspace,
     addExpense, editExpense, deleteExpense,
     addCard, editCard, deleteCard,
     addRule, deleteRule,

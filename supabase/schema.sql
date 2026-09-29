@@ -193,6 +193,19 @@ $$;
 grant execute on function public.create_family(text) to authenticated;
 grant execute on function public.join_family(text) to authenticated;
 
+create or replace function public.delete_family(family_id_input uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'You must be signed in'; end if;
+  if not public.is_family_admin(family_id_input) then
+    raise exception 'Only family administrators can delete this workspace';
+  end if;
+  delete from public.families where id = family_id_input;
+end;
+$$;
+
+grant execute on function public.delete_family(uuid) to authenticated;
+
 alter table public.profiles enable row level security;
 alter table public.families enable row level security;
 alter table public.family_members enable row level security;
