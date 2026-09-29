@@ -1,0 +1,223 @@
+import { useEffect, useState, type ComponentType } from 'react'
+import {
+  ArrowDownToLine, ArrowRight, BadgeIndianRupee, BarChart3, Bell, BookOpen, Check, ChevronDown, ChevronLeft,
+  ChevronRight, CircleHelp, CreditCard, Edit3, Ellipsis, Filter, Flame, Gauge, Gift, Home, Lightbulb,
+  Menu, MoreHorizontal, Pencil, Plus, ReceiptText, Search, Settings2, SlidersHorizontal, Sparkles, Tag,
+  Trash2, TrendingUp, Users, Wallet, X, Zap
+} from 'lucide-react'
+import type { Card, Expense, FamilyData, Tab } from './types'
+import { demoData } from './data/demoData'
+import { loadData, saveData } from './lib/storage'
+import { compactMoney, formatDate, money, monthName, relativeDate } from './lib/format'
+import { recommend, type Recommendation } from './lib/recommendation'
+import { isSupabaseConfigured } from './lib/supabase'
+
+const iconMap: Record<string, ComponentType<any>> = { shopping: ShoppingIcon, travel: PlaneIcon, food: UtensilsIcon, groceries: BasketIcon, bills: ReceiptText, fuel: FuelIcon, entertainment: ClapperIcon, electronics: LaptopIcon, healthcare: HeartIcon, education: BookOpen, other: CircleHelp }
+function ShoppingIcon() { return <Tag size={16} /> }
+function PlaneIcon() { return <span className="emoji-icon">✈</span> }
+function UtensilsIcon() { return <span className="emoji-icon">♨</span> }
+function BasketIcon() { return <span className="emoji-icon">⌁</span> }
+function FuelIcon() { return <span className="emoji-icon">◒</span> }
+function ClapperIcon() { return <span className="emoji-icon">◉</span> }
+function LaptopIcon() { return <span className="emoji-icon">▣</span> }
+function HeartIcon() { return <span className="emoji-icon">♥</span> }
+
+function App() {
+  const [data, setData] = useState<FamilyData>(() => loadData(demoData))
+  const [tab, setTab] = useState<Tab>('dashboard')
+  const [showExpense, setShowExpense] = useState(false)
+  const [showRecommend, setShowRecommend] = useState(false)
+  const [selectedCard, setSelectedCard] = useState<Card | null>(null)
+  const [toast, setToast] = useState('')
+  const [dark, setDark] = useState(false)
+
+  useEffect(() => { saveData(data) }, [data])
+  useEffect(() => {
+    if (!toast) return
+    const timer = window.setTimeout(() => setToast(''), 2800)
+    return () => window.clearTimeout(timer)
+  }, [toast])
+
+  const addExpense = (expense: Expense) => {
+    setData((current) => ({ ...current, expenses: [expense, ...current.expenses] }))
+    setShowExpense(false)
+    setToast('Expense added and synced')
+  }
+  const deleteExpense = (id: string) => {
+    setData((current) => ({ ...current, expenses: current.expenses.filter((expense) => expense.id !== id) }))
+    setToast('Expense removed')
+  }
+
+  return (
+    <div className={dark ? 'app dark' : 'app'}>
+      <div className="app-shell">
+        <Sidebar tab={tab} setTab={setTab} dark={dark} setDark={setDark} />
+        <main className="main">
+          <MobileHeader tab={tab} />
+          {tab === 'dashboard' && <Dashboard data={data} onAdd={() => setShowExpense(true)} onRecommend={() => setShowRecommend(true)} onCard={setSelectedCard} setTab={setTab} />}
+          {tab === 'cards' && <CardsPage data={data} onCard={setSelectedCard} />}
+          {tab === 'expenses' && <ExpensesPage data={data} onAdd={() => setShowExpense(true)} onDelete={deleteExpense} />}
+          {tab === 'reports' && <ReportsPage data={data} />}
+        </main>
+      </div>
+      <button className="floating-action" onClick={() => setShowExpense(true)}><Plus size={20} strokeWidth={2.5} /><span>Expense</span></button>
+      <div className="mobile-nav">
+        {navItems.map((item) => <NavButton key={item.id} item={item} active={tab === item.id} onClick={() => setTab(item.id)} />)}
+      </div>
+      {showExpense && <ExpenseModal data={data} onClose={() => setShowExpense(false)} onSave={addExpense} />}
+      {showRecommend && <RecommendationModal data={data} onClose={() => setShowRecommend(false)} />}
+      {selectedCard && <CardDetail card={selectedCard} data={data} onClose={() => setSelectedCard(null)} onAdd={() => { setSelectedCard(null); setShowExpense(true) }} />}
+      {toast && <div className="toast"><Check size={17} /> {toast}</div>}
+    </div>
+  )
+}
+
+const navItems: { id: Tab; label: string; icon: typeof Home }[] = [
+  { id: 'dashboard', label: 'Home', icon: Home },
+  { id: 'cards', label: 'Cards', icon: CreditCard },
+  { id: 'expenses', label: 'Activity', icon: ReceiptText },
+  { id: 'reports', label: 'Reports', icon: BarChart3 },
+]
+
+function NavButton({ item, active, onClick }: { item: typeof navItems[number]; active: boolean; onClick: () => void }) {
+  const Icon = item.icon
+  return <button className={active ? 'nav-item active' : 'nav-item'} onClick={onClick}><Icon size={19} /><span>{item.label}</span></button>
+}
+
+function Sidebar({ tab, setTab, dark, setDark }: { tab: Tab; setTab: (tab: Tab) => void; dark: boolean; setDark: (value: boolean) => void }) {
+  return <aside className="sidebar">
+    <div className="brand"><div className="brand-mark">o</div><span>orbit</span></div>
+    <div className="workspace"><div className="family-avatar">T</div><div><small>Family workspace</small><strong>The Tulsians</strong></div><ChevronDown size={15} /></div>
+    <nav className="side-nav">{navItems.map((item) => <NavButton key={item.id} item={item} active={tab === item.id} onClick={() => setTab(item.id)} />)}</nav>
+    <div className="sidebar-bottom">
+      <div className="sync-status"><span className="pulse" /> {isSupabaseConfigured ? 'Live sync enabled' : 'Demo mode · local sync'}</div>
+      <button className="side-link"><Users size={17} /> Family members <span className="side-count">3</span></button>
+      <button className="side-link"><Settings2 size={17} /> Settings</button>
+      <button className="theme-toggle" onClick={() => setDark(!dark)}><span>{dark ? '☼' : '☾'}</span>{dark ? 'Light mode' : 'Dark mode'}</button>
+      <div className="profile"><div className="avatar avatar-teal">MT</div><div><strong>Mohnish</strong><small>Administrator</small></div><MoreHorizontal size={17} /></div>
+    </div>
+  </aside>
+}
+
+function MobileHeader({ tab }: { tab: Tab }) {
+  const title = navItems.find((item) => item.id === tab)?.label ?? 'Home'
+  return <header className="mobile-header"><div className="brand"><div className="brand-mark">o</div><span>orbit</span></div><div className="mobile-header-actions"><button aria-label="Notifications"><Bell size={19} /></button><div className="avatar avatar-teal">MT</div></div><span className="mobile-title">{title}</span></header>
+}
+
+function Dashboard({ data, onAdd, onRecommend, onCard, setTab }: { data: FamilyData; onAdd: () => void; onRecommend: () => void; onCard: (card: Card) => void; setTab: (tab: Tab) => void }) {
+  const total = data.expenses.reduce((sum, expense) => sum + expense.amount, 0)
+  const recent = data.expenses.slice(0, 5)
+  const targetCards = data.cards.map((card) => ({ card, spent: cardSpend(card, data.expenses) }))
+  const needsAttention = targetCards.filter(({ card, spent }) => spent < card.target).sort((a, b) => (b.card.target - b.spent) - (a.card.target - a.spent))[0]
+  return <div className="page">
+    <div className="topbar"><div><p className="eyebrow">Tuesday, 29 September 2026 <span className="live-dot" /> Live</p><h1>Good morning, Mohnish <span className="wave">✦</span></h1><p className="muted">Here’s how the family is doing this month.</p></div><div className="top-actions"><button className="icon-button"><Bell size={18} /><i /></button><div className="avatar avatar-teal">MT</div></div></div>
+    <section className="hero-grid">
+      <div className="spend-hero"><div className="hero-orbit orbit-one" /><div className="hero-orbit orbit-two" /><div className="hero-content"><span className="eyebrow light">Family spending · September 2026</span><strong>{money(total)}</strong><span className="hero-compare"><TrendingUp size={14} /> 12.4% vs August</span><div className="hero-footer"><span>Across {data.expenses.length} expenses</span><span>Updated just now</span></div></div></div>
+      <div className="quick-actions"><p className="section-kicker">Quick actions</p><button className="quick-card primary" onClick={onAdd}><span className="quick-icon"><Plus size={20} /></span><span><strong>Add an expense</strong><small>Log a purchase in seconds</small></span><ArrowRight size={17} /></button><button className="quick-card" onClick={onRecommend}><span className="quick-icon gold"><Sparkles size={19} /></span><span><strong>Which card should I use?</strong><small>Get a clear recommendation</small></span><ArrowRight size={17} /></button></div>
+    </section>
+    {needsAttention && <div className="notice"><span className="notice-icon"><Zap size={16} /></span><span><strong>{money(needsAttention.card.target - needsAttention.spent)} to go</strong> to reach {needsAttention.card.name}’s monthly target.</span><button onClick={() => onCard(needsAttention.card)}>View card <ArrowRight size={14} /></button></div>}
+    <section className="section-block"><SectionHeading title="Card overview" action="View all cards" onAction={() => setTab('cards')} /><div className="card-grid">{targetCards.map(({ card, spent }) => <CardTile key={card.id} card={card} spent={spent} onClick={() => onCard(card)} />)}</div></section>
+    <section className="section-block lower-grid"><div><SectionHeading title="Recent activity" action="See all" onAction={() => setTab('expenses')} /><div className="activity-list">{recent.map((expense) => <ExpenseRow key={expense.id} expense={expense} data={data} />)}</div></div><Insights data={data} /></section>
+  </div>
+}
+
+function SectionHeading({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
+  return <div className="section-heading"><h2>{title}</h2>{action && <button onClick={onAction}>{action} <ArrowRight size={14} /></button>}</div>
+}
+
+function CardTile({ card, spent, onClick }: { card: Card; spent: number; onClick: () => void }) {
+  const percent = Math.min(100, Math.round(spent / card.target * 100))
+  return <button className="card-tile" onClick={onClick}><div className="card-top"><div><span className="card-issuer">{card.issuer}</span><strong>{card.name}</strong></div><span className="card-dots">•••</span></div><div className="card-number">•••• {card.lastFour}</div><div className="mini-progress"><span style={{ width: `${percent}%`, background: card.accent }} /></div><div className="card-amounts"><strong>{money(spent)} <span>/ {money(card.target)}</span></strong><span>{Math.max(0, card.target - spent) > 0 ? `${compactMoney(card.target - spent)} remaining` : 'Target reached'}</span></div><div className="card-meta"><span><div className="avatar tiny" style={{ background: card.accent }}>{card.ownerName[0]}</div> {card.ownerName}</span><span>{percent}% used</span></div></button>
+}
+
+function ExpenseRow({ expense, data }: { expense: Expense; data: FamilyData }) {
+  const card = data.cards.find((item) => item.id === expense.cardId)
+  const category = data.categories.find((item) => item.id === expense.categoryId)
+  const Icon = iconMap[expense.categoryId] ?? CircleHelp
+  return <div className="expense-row"><div className="expense-icon" style={{ background: `${category?.color}20`, color: category?.color }}><Icon size={17} /></div><div className="expense-main"><strong>{expense.merchant}</strong><span>{card?.name} <i>·</i> {category?.name}</span></div><div className="expense-right"><strong>{money(expense.amount)}</strong><span>{relativeDate(expense.date)}</span></div></div>
+}
+
+function Insights({ data }: { data: FamilyData }) {
+  const categoryTotals = data.categories.map((category) => ({ category, amount: data.expenses.filter((expense) => expense.categoryId === category.id).reduce((sum, expense) => sum + expense.amount, 0) })).filter((item) => item.amount).sort((a, b) => b.amount - a.amount)
+  return <div className="insights-card"><div className="insight-title"><span className="spark"><Sparkles size={16} /></span><strong>Monthly insights</strong><span className="beta">Auto</span></div><div className="insight-item"><span className="insight-bullet green"><TrendingUp size={14} /></span><p><strong>{categoryTotals[0]?.category.name ?? 'Shopping'}</strong> is your largest spending category this month.</p></div><div className="insight-item"><span className="insight-bullet gold"><Gauge size={14} /></span><p><strong>{data.cards.filter((card) => cardSpend(card, data.expenses) >= card.target).length} cards</strong> reached their configured monthly targets.</p></div><div className="insight-item"><span className="insight-bullet purple"><Flame size={14} /></span><p>Most delivery spending was made using <strong>HDFC Millennia</strong>.</p></div></div>
+}
+
+function CardsPage({ data, onCard }: { data: FamilyData; onCard: (card: Card) => void }) {
+  return <div className="page"><PageTitle eyebrow="Your wallet" title="Cards" subtitle={`${data.cards.length} active cards shared with your family`} action={<button className="button button-dark"><Plus size={16} /> Add card</button>} /><div className="cards-page-grid">{data.cards.map((card) => <div key={card.id}><CardTile card={card} spent={cardSpend(card, data.expenses)} onClick={() => onCard(card)} /><div className="card-rule-summary"><span><Gift size={14} /> {card.rules.length} benefits configured</span><span>{card.billingStart === 1 ? 'Calendar month' : `${card.billingStart}th → ${card.billingEnd}th cycle`}</span></div></div>)}</div><div className="secure-note"><span><BadgeIndianRupee size={19} /></span><p><strong>Your card data stays safe</strong><br />Orbit only stores the card name, issuer, owner, and last 4 digits. Never enter a full card number, CVV, PIN, or banking password.</p></div></div>
+}
+
+function ExpensesPage({ data, onAdd, onDelete }: { data: FamilyData; onAdd: () => void; onDelete: (id: string) => void }) {
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState('All cards')
+  const visible = data.expenses.filter((expense) => {
+    const card = data.cards.find((item) => item.id === expense.cardId)
+    return `${expense.merchant} ${card?.name}`.toLowerCase().includes(search.toLowerCase()) && (filter === 'All cards' || card?.name === filter)
+  })
+  return <div className="page"><PageTitle eyebrow="Shared ledger" title="Expenses" subtitle={`${visible.length} purchases this month`} action={<button className="button button-dark" onClick={onAdd}><Plus size={16} /> Add expense</button>} /><div className="filters"><div className="search-box"><Search size={17} /><input placeholder="Search merchant or card" value={search} onChange={(event) => setSearch(event.target.value)} /></div><div className="select-box"><Filter size={15} /><select value={filter} onChange={(event) => setFilter(event.target.value)}><option>All cards</option>{data.cards.map((card) => <option key={card.id}>{card.name}</option>)}</select><ChevronDown size={15} /></div><button className="filter-button"><SlidersHorizontal size={16} /> Filters</button></div><div className="expense-table"><div className="table-head"><span>Purchase</span><span>Card</span><span>Added by</span><span>Date</span><span>Amount</span><span /></div>{visible.map((expense) => <ExpenseTableRow key={expense.id} expense={expense} data={data} onDelete={onDelete} />)}</div></div>
+}
+
+function ExpenseTableRow({ expense, data, onDelete }: { expense: Expense; data: FamilyData; onDelete: (id: string) => void }) {
+  const card = data.cards.find((item) => item.id === expense.cardId)
+  const category = data.categories.find((item) => item.id === expense.categoryId)
+  const owner = data.members.find((member) => member.id === expense.createdBy)
+  const Icon = iconMap[expense.categoryId] ?? CircleHelp
+  return <div className="table-row"><div className="purchase-cell"><div className="expense-icon small" style={{ background: `${category?.color}20`, color: category?.color }}><Icon size={15} /></div><div><strong>{expense.merchant}</strong><span>{category?.name} {expense.tagIds.slice(0, 2).map((id) => <em key={id}>{data.tags.find((tag) => tag.id === id)?.name}</em>)}</span></div></div><div className="card-cell"><span className="card-dot" style={{ background: card?.accent }} />{card?.name}<small>•••• {card?.lastFour}</small></div><div className="owner-cell"><div className="avatar tiny" style={{ background: owner?.color }}>{owner?.initials[0]}</div>{owner?.name}</div><span className="date-cell">{formatDate(expense.date)}</span><strong className="amount-cell">{money(expense.amount)}</strong><button className="row-menu" onClick={() => onDelete(expense.id)} title="Delete expense"><Trash2 size={15} /></button></div>
+}
+
+function ReportsPage({ data }: { data: FamilyData }) {
+  const [month, setMonth] = useState('September 2026')
+  const total = data.expenses.reduce((sum, expense) => sum + expense.amount, 0)
+  const categoryTotals = data.categories.map((category) => ({ ...category, amount: data.expenses.filter((expense) => expense.categoryId === category.id).reduce((sum, expense) => sum + expense.amount, 0) })).filter((item) => item.amount).sort((a, b) => b.amount - a.amount)
+  const maxCategory = Math.max(...categoryTotals.map((item) => item.amount))
+  return <div className="page"><PageTitle eyebrow="Make sense of the month" title="Reports" subtitle="A clear view of how your family is spending" action={<button className="button button-outline"><ArrowDownToLine size={16} /> Export CSV</button>} /><div className="report-toolbar"><button className="month-switch"><ChevronLeft size={16} onClick={() => setMonth('August 2026')} />{month}<ChevronRight size={16} onClick={() => setMonth('October 2026')} /></button><span className="report-updated"><span className="live-dot" /> Calculated from actual transactions</span></div><div className="report-stats"><div><span>Total family spending</span><strong>{money(total)}</strong><small className="positive"><TrendingUp size={13} /> 12.4% vs August</small></div><div><span>Average per expense</span><strong>{money(Math.round(total / data.expenses.length))}</strong><small>{data.expenses.length} expenses logged</small></div><div><span>Online vs offline</span><strong>68% <small className="muted">online</small></strong><small>₹{Math.round(total * .32).toLocaleString('en-IN')} offline</small></div></div><div className="reports-grid"><div className="report-panel"><SectionHeading title="Spending by category" action="View details" /><div className="donut-wrap"><DonutChart values={categoryTotals.map((item) => item.amount)} colors={categoryTotals.map((item) => item.color)} /><div className="donut-total"><strong>{compactMoney(total)}</strong><span>this month</span></div></div><div className="legend">{categoryTotals.slice(0, 5).map((item) => <div key={item.id}><span className="legend-dot" style={{ background: item.color }} /><span>{item.name}</span><strong>{money(item.amount)}</strong></div>)}</div></div><div className="report-panel"><SectionHeading title="Spending by card" /><div className="bar-list">{data.cards.map((card) => { const amount = cardSpend(card, data.expenses); return <div className="bar-item" key={card.id}><div><span>{card.name}</span><strong>{money(amount)}</strong></div><div className="bar-track"><span style={{ width: `${amount / maxCategory / 2 * 100}%`, background: card.accent }} /></div></div> })}</div><div className="compare-card"><span><ArrowDownToLine size={16} /> August total</span><strong>₹1,12,400</strong><small className="positive">+₹12,450 this month</small></div></div></div><div className="target-report"><SectionHeading title="Monthly card targets" action="Manage rules" /><div className="target-grid">{data.cards.map((card) => { const spent = cardSpend(card, data.expenses); const percent = Math.round(spent / card.target * 100); return <div className="target-row" key={card.id}><div className="target-name"><span className="card-color" style={{ background: card.accent }} /><strong>{card.name}</strong><small>Target {money(card.target)}</small></div><div className="target-progress"><div><span style={{ width: `${Math.min(100, percent)}%`, background: card.accent }} /></div><small>{percent}%</small></div><div className={percent >= 100 ? 'target-status reached' : 'target-status'}>{percent >= 100 ? 'Target reached' : `${money(card.target - spent)} remaining`}</div></div> })}</div></div></div>
+}
+
+function DonutChart({ values, colors }: { values: number[]; colors: string[] }) {
+  const total = values.reduce((sum, value) => sum + value, 0)
+  let offset = 0
+  return <svg className="donut" viewBox="0 0 42 42"><circle cx="21" cy="21" r="15.9" fill="none" stroke="#eef0ea" strokeWidth="7" />{values.map((value, index) => { const dash = value / total * 100; const circle = <circle key={colors[index]} cx="21" cy="21" r="15.9" fill="none" stroke={colors[index]} strokeWidth="7" strokeDasharray={`${dash} ${100 - dash}`} strokeDashoffset={-offset + 25} />; offset += dash; return circle })}</svg>
+}
+
+function PageTitle({ eyebrow, title, subtitle, action }: { eyebrow: string; title: string; subtitle: string; action?: React.ReactNode }) {
+  return <div className="page-title"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="muted">{subtitle}</p></div>{action}</div>
+}
+
+function ExpenseModal({ data, onClose, onSave }: { data: FamilyData; onClose: () => void; onSave: (expense: Expense) => void }) {
+  const [cardId, setCardId] = useState(data.cards[0]?.id ?? '')
+  const [amount, setAmount] = useState('')
+  const [merchant, setMerchant] = useState('')
+  const [categoryId, setCategoryId] = useState('shopping')
+  const [tagIds, setTagIds] = useState<string[]>(['online'])
+  const [date, setDate] = useState('2026-09-29')
+  const [note, setNote] = useState('')
+  const toggleTag = (id: string) => setTagIds((current) => current.includes(id) ? current.filter((tag) => tag !== id) : [...current, id])
+  const submit = (event: React.FormEvent) => { event.preventDefault(); if (!merchant || !amount || Number(amount) <= 0) return; onSave({ id: `expense-${Date.now()}`, cardId, createdBy: 'mohnish', amount: Number(amount), merchant, categoryId, date, note, tagIds }) }
+  return <ModalShell title="Add an expense" subtitle="Keep the family ledger up to date." onClose={onClose}><form className="expense-form" onSubmit={submit}><label>Card<select value={cardId} onChange={(event) => setCardId(event.target.value)}>{data.cards.map((card) => <option key={card.id} value={card.id}>{card.name} ···· {card.lastFour}</option>)}</select></label><label>Amount<div className="amount-input"><span>₹</span><input autoFocus inputMode="decimal" placeholder="0" value={amount} onChange={(event) => setAmount(event.target.value.replace(/[^\d.]/g, ''))} /></div></label><label>Merchant<input placeholder="e.g. Amazon" value={merchant} onChange={(event) => setMerchant(event.target.value)} /></label><label>Category<div className="category-pills">{data.categories.slice(0, 8).map((category) => <button type="button" key={category.id} className={categoryId === category.id ? 'category-pill selected' : 'category-pill'} onClick={() => setCategoryId(category.id)}>{category.name}</button>)}</div></label><label>Tags<div className="tag-pills">{data.tags.slice(0, 7).map((tag) => <button type="button" key={tag.id} className={tagIds.includes(tag.id) ? 'tag-pill selected' : 'tag-pill'} onClick={() => toggleTag(tag.id)}>{tag.name}</button>)}</div></label><div className="form-row"><label>Date<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Added by<div className="added-by"><div className="avatar tiny avatar-teal">MT</div> Mohnish</div></label></div><label>Note <span className="optional">Optional</span><textarea placeholder="Anything worth remembering?" rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></label><div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-dark" type="submit"><Check size={16} /> Save expense</button></div></form></ModalShell>
+}
+
+function RecommendationModal({ data, onClose }: { data: FamilyData; onClose: () => void }) {
+  const [amount, setAmount] = useState('4000')
+  const [category, setCategory] = useState('shopping')
+  const [tags, setTags] = useState<string[]>(['online'])
+  const [hasSubmitted, setHasSubmitted] = useState(true)
+  const results = recommend(data.cards, data.expenses, data.categories, data.tags, Number(amount) || 0, category, tags)
+  const best = results[0]
+  return <ModalShell title="Which card should I use?" subtitle="A transparent recommendation from your configured benefits." onClose={onClose}><div className="recommend-form"><label>Purchase amount<div className="amount-input"><span>₹</span><input inputMode="decimal" value={amount} onChange={(event) => { setAmount(event.target.value); setHasSubmitted(false) }} /></div></label><label>Category<select value={category} onChange={(event) => { setCategory(event.target.value); setHasSubmitted(false) }}>{data.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Tags<div className="tag-pills">{data.tags.slice(0, 7).map((tag) => <button type="button" key={tag.id} className={tags.includes(tag.id) ? 'tag-pill selected' : 'tag-pill'} onClick={() => setTags((current) => current.includes(tag.id) ? current.filter((id) => id !== tag.id) : [...current, tag.id])}>{tag.name}</button>)}</div></label><button className="button button-dark full" onClick={() => setHasSubmitted(true)}><Sparkles size={16} /> Find my best card</button></div>{hasSubmitted && best && <div className="recommend-result">{best.missingRules ? <div className="empty-recommend"><CircleHelp size={22} /><strong>No configured card benefit applies to this purchase.</strong><span>Add card rules to get a recommendation you can trust.</span></div> : <><div className="recommended-label"><Sparkles size={15} /> Recommended for this purchase</div><div className="recommended-card"><div className="recommend-card-visual" style={{ background: best.card.accent }}><span>{best.card.issuer}</span><strong>{best.card.name}</strong><small>•••• {best.card.lastFour}</small></div><div className="recommend-detail"><div><span>Estimated benefit</span><strong>{money(best.benefit)}</strong></div><ul>{best.reasons.map((reason) => <li key={reason}><Check size={14} /> {reason}</li>)}</ul></div></div><div className="other-options"><span>Other options</span>{results.slice(1).filter((item) => !item.missingRules).map((item) => <div key={item.card.id}><strong>{item.card.name}</strong><span>{money(item.benefit)} estimated benefit</span></div>)}</div></>}</div>}</ModalShell>
+}
+
+function CardDetail({ card, data, onClose, onAdd }: { card: Card; data: FamilyData; onClose: () => void; onAdd: () => void }) {
+  const spent = cardSpend(card, data.expenses)
+  const expenses = data.expenses.filter((expense) => expense.cardId === card.id)
+  const categories = data.categories.map((category) => ({ ...category, amount: expenses.filter((expense) => expense.categoryId === category.id).reduce((sum, expense) => sum + expense.amount, 0) })).filter((item) => item.amount).sort((a, b) => b.amount - a.amount)
+  return <div className="drawer-backdrop" onMouseDown={onClose}><aside className="detail-drawer" onMouseDown={(event) => event.stopPropagation()}><div className="drawer-header"><button className="icon-button" onClick={onClose}><ChevronLeft size={19} /></button><span>Card details</span><button className="icon-button"><Ellipsis size={19} /></button></div><div className="large-card" style={{ background: card.accent }}><span>{card.issuer}</span><strong>{card.name}</strong><small>•••• {card.lastFour}</small><div><span>{card.ownerName}</span><span>{card.cardType}</span></div></div><div className="drawer-content"><div className="detail-heading"><div><p className="eyebrow">Current period</p><h2>{money(spent)} <span>/ {money(card.target)}</span></h2></div><button className="button button-dark compact" onClick={onAdd}><Plus size={15} /> Expense</button></div><div className="detail-progress"><span style={{ width: `${Math.min(100, spent / card.target * 100)}%`, background: card.accent }} /></div><div className="detail-between"><span>{Math.round(spent / card.target * 100)}% complete</span><strong>{money(Math.max(0, card.target - spent))} remaining</strong></div><div className="detail-section"><SectionHeading title="Spending breakdown" /><div className="breakdown-list">{categories.slice(0, 4).map((item) => <div key={item.id}><span className="legend-dot" style={{ background: item.color }} /><span>{item.name}</span><strong>{money(item.amount)}</strong></div>)}</div></div><div className="detail-section"><SectionHeading title="Card benefits" /><div className="benefit-list">{card.rules.map((rule) => <div key={rule.id}><span className="benefit-icon"><Gift size={15} /></span><p><strong>{rule.rewardDescription}</strong><small>{rule.tag ? `When tagged ${data.tags.find((tag) => tag.id === rule.tag)?.name}` : 'All eligible purchases'}</small></p><ChevronRight size={15} /></div>)}</div></div><div className="detail-section"><SectionHeading title="Recent spending" /><div className="activity-list">{expenses.slice(0, 4).map((expense) => <ExpenseRow key={expense.id} expense={expense} data={data} />)}</div></div></div></aside></div>
+}
+
+function ModalShell({ title, subtitle, onClose, children }: { title: string; subtitle: string; onClose: () => void; children: React.ReactNode }) {
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-header"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" onClick={onClose}><X size={18} /></button></div>{children}</div></div>
+}
+
+function cardSpend(card: Card, expenses: FamilyData['expenses']) {
+  return expenses.filter((expense) => expense.cardId === card.id && expense.date.startsWith('2026-09')).reduce((sum, expense) => sum + expense.amount, 0)
+}
+
+export default App
