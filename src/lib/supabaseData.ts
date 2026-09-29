@@ -189,6 +189,27 @@ export async function insertCard(familyId: string, card: NewCard) {
   if (result.error) throw result.error
 }
 
+export async function updateCard(cardId: string, card: Partial<NewCard>) {
+  const client = requireClient()
+  const payload: any = {}
+  if (card.name !== undefined) payload.name = card.name.trim()
+  if (card.issuer !== undefined) payload.issuer = card.issuer.trim()
+  if (card.lastFour !== undefined) payload.last_four = card.lastFour
+  if (card.ownerId !== undefined) payload.owner_id = card.ownerId
+  if (card.cardType !== undefined) payload.card_type = card.cardType.trim()
+  if (card.target !== undefined) payload.monthly_spend_target = Math.round(card.target * 100)
+  if (card.annualFee !== undefined) payload.annual_fee = Math.round(card.annualFee * 100)
+  if (card.billingStart !== undefined) payload.billing_cycle_start = card.billingStart
+  if (card.billingEnd !== undefined) payload.billing_cycle_end = card.billingEnd
+  const result = await client.from('cards').update(payload).eq('id', cardId)
+  if (result.error) throw result.error
+}
+
+export async function removeCard(cardId: string) {
+  const result = await requireClient().from('cards').delete().eq('id', cardId)
+  if (result.error) throw result.error
+}
+
 export async function insertRule(rule: NewRule) {
   const result = await requireClient().from('card_rules').insert({
     card_id: rule.cardId,
@@ -200,5 +221,44 @@ export async function insertRule(rule: NewRule) {
     priority: rule.priority,
     active: true,
   })
+  if (result.error) throw result.error
+}
+
+export async function removeRule(ruleId: string) {
+  const result = await requireClient().from('card_rules').delete().eq('id', ruleId)
+  if (result.error) throw result.error
+}
+
+export async function updateExpense(expense: Expense) {
+  const client = requireClient()
+  const result = await client.from('expenses').update({
+    card_id: expense.cardId,
+    amount: Math.round(expense.amount * 100),
+    merchant: expense.merchant.trim(),
+    category_id: expense.categoryId,
+    date: expense.date,
+    note: expense.note.trim(),
+  }).eq('id', expense.id)
+  if (result.error) throw result.error
+
+  await client.from('expense_tags').delete().eq('expense_id', expense.id)
+  if (expense.tagIds.length) {
+    const tags = await client.from('expense_tags').insert(expense.tagIds.map((tagId) => ({ expense_id: expense.id, tag_id: tagId })))
+    if (tags.error) throw tags.error
+  }
+}
+
+export async function updateWorkspaceName(familyId: string, name: string) {
+  const result = await requireClient().from('families').update({ name: name.trim() }).eq('id', familyId)
+  if (result.error) throw result.error
+}
+
+export async function removeFamilyMember(familyId: string, memberId: string) {
+  const result = await requireClient().from('family_members').delete().eq('family_id', familyId).eq('user_id', memberId)
+  if (result.error) throw result.error
+}
+
+export async function updateProfileName(userId: string, name: string) {
+  const result = await requireClient().from('profiles').update({ name: name.trim() }).eq('id', userId)
   if (result.error) throw result.error
 }

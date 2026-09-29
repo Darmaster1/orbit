@@ -1,4 +1,4 @@
-export type Tab = 'dashboard' | 'cards' | 'expenses' | 'reports'
+export type Tab = 'dashboard' | 'cards' | 'expenses' | 'reports' | 'settings' | 'profile'
 export type Role = 'admin' | 'member'
 export type RewardType = 'percentage' | 'fixed' | 'points' | 'miles' | 'cashback'
 
@@ -8,6 +8,7 @@ export type FamilyMember = {
   initials: string
   role: Role
   color: string
+  email?: string
 }
 
 export type Category = {
